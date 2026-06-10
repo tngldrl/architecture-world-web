@@ -6,7 +6,7 @@ import { auth, GithubAuthProvider, signInWithPopup, signInAnonymously, onAuthSta
 import type { User } from "firebase/auth";
 
 export default function Dashboard() {
-  const [repoPaths, setRepoPaths] = useState("/Users/kasedamineya/src/repostory/architecture-world-web");
+  const [repoUrls, setRepoUrls] = useState<string[]>(["https://github.com/GoogleCloudPlatform/microservices-demo.git"]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -67,7 +67,28 @@ export default function Dashboard() {
     }
   };
 
+  const handleUrlChange = (idx: number, val: string) => {
+    const newUrls = [...repoUrls];
+    newUrls[idx] = val;
+    setRepoUrls(newUrls);
+  };
+
+  const handleAddUrl = () => {
+    setRepoUrls([...repoUrls, ""]);
+  };
+
+  const handleRemoveUrl = (idx: number) => {
+    const newUrls = repoUrls.filter((_, i) => i !== idx);
+    setRepoUrls(newUrls);
+  };
+
   const handleGenerate = async () => {
+    const filteredUrls = repoUrls.map(u => u.trim()).filter(Boolean);
+    if (filteredUrls.length === 0) {
+      setError("Please enter at least one repository URL.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setStatus("Starting analysis...");
@@ -80,7 +101,7 @@ export default function Dashboard() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({ repo_paths: repoPaths }),
+        body: JSON.stringify({ repo_urls: filteredUrls }),
       });
       
       if (!res.ok) {
@@ -168,17 +189,37 @@ export default function Dashboard() {
       
       <div className="bg-white p-8 rounded-xl shadow-lg max-w-lg w-full mt-10">
         <h1 className="text-2xl font-bold mb-2 text-center text-gray-800">Architecture as a World</h1>
-        <p className="text-gray-500 text-center mb-8 text-sm">Enter the absolute paths to the repositories you want to analyze.</p>
+        <p className="text-gray-500 text-center mb-8 text-sm">Enter the GitHub repository clone URLs you want to analyze.</p>
         
         <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Repository Paths (comma separated)</label>
-          <textarea
-            className="w-full border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            rows={4}
-            value={repoPaths}
-            onChange={(e) => setRepoPaths(e.target.value)}
-            placeholder="/path/to/repo1, /path/to/repo2"
-          />
+          <label className="block text-sm font-medium text-gray-700 mb-2">Repository URLs</label>
+          {repoUrls.map((url, idx) => (
+            <div key={idx} className="flex gap-2 mb-3 items-center">
+              <input
+                type="text"
+                className="flex-grow border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                value={url}
+                onChange={(e) => handleUrlChange(idx, e.target.value)}
+                placeholder="https://github.com/owner/repo.git"
+              />
+              {repoUrls.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => handleRemoveUrl(idx)}
+                  className="text-red-500 hover:text-red-700 text-sm font-bold p-2"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={handleAddUrl}
+            className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1 mt-2"
+          >
+            + Add Repository
+          </button>
         </div>
         
         <button

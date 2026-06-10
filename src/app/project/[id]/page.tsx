@@ -23,6 +23,7 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
   
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  const [repositories, setRepositories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,6 +33,10 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
   const [chatMessages, setChatMessages] = useState<{role: string, content: string}[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
+
+  const selectedRepoUrl = selectedMs
+    ? repositories.find((r) => r.id === selectedMs.repository_id)?.url
+    : null;
 
   useEffect(() => {
     async function fetchData() {
@@ -97,6 +102,7 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
 
         setNodes(initialNodes);
         setEdges(initialEdges);
+        setRepositories(data.repositories || []);
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -205,17 +211,36 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
       <div className={`fixed top-0 right-0 w-96 h-full bg-white shadow-2xl border-l border-gray-200 transform transition-transform duration-300 flex flex-col z-50 ${isDrawerOpen ? 'translate-x-0' : 'translate-x-full'}`}>
         {selectedMs && (
           <>
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-white shadow-sm z-10">
-              <div className="flex items-center gap-3">
-                <img src={selectedMs.avatar_image_url} alt={selectedMs.name} className="w-12 h-12 rounded-full bg-black object-cover" />
-                <div>
-                  <h2 className="font-bold text-gray-800 text-lg leading-tight">{selectedMs.name}</h2>
-                  <p className="text-xs text-gray-500 line-clamp-1">{selectedMs.description}</p>
+            <div className="p-4 border-b border-gray-200 bg-white shadow-sm z-10 flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <img src={selectedMs.avatar_image_url} alt={selectedMs.name} className="w-12 h-12 rounded-full bg-black object-cover" />
+                  <div>
+                    <h2 className="font-bold text-gray-800 text-lg leading-tight">{selectedMs.name}</h2>
+                    {selectedRepoUrl && (
+                      <div className="text-xs text-gray-500 mt-1 break-all">
+                        <span className="font-medium text-gray-400 mr-1">Repo:</span>
+                        <a
+                          href={selectedRepoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-500 hover:underline font-mono"
+                        >
+                          {selectedRepoUrl}
+                        </a>
+                      </div>
+                    )}
+                  </div>
                 </div>
+                <button onClick={() => setIsDrawerOpen(false)} className="text-gray-400 hover:text-gray-700 p-2 text-2xl font-bold transition-colors">
+                  &times;
+                </button>
               </div>
-              <button onClick={() => setIsDrawerOpen(false)} className="text-gray-500 hover:text-gray-800 p-2 text-2xl font-bold">
-                &times;
-              </button>
+              {selectedMs.description && (
+                <div className="text-xs text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100 whitespace-pre-wrap leading-relaxed">
+                  {selectedMs.description}
+                </div>
+              )}
             </div>
             
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
