@@ -7,6 +7,8 @@ import type { User } from "firebase/auth";
 
 export default function Dashboard() {
   const [repoUrls, setRepoUrls] = useState<string[]>(["https://github.com/GoogleCloudPlatform/microservices-demo.git"]);
+  const [projectName, setProjectName] = useState("");
+  const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -32,6 +34,29 @@ export default function Dashboard() {
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setProjects([]);
+      return;
+    }
+    
+    async function fetchProjects() {
+      try {
+        const token = user && auth && !user.isAnonymous ? await user.getIdToken() : "guest";
+        const res = await fetch("http://localhost:8000/api/projects", {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setProjects(data || []);
+        }
+      } catch (err) {
+        console.error("Failed to fetch projects history", err);
+      }
+    }
+    fetchProjects();
+  }, [user]);
 
   const handleGitHubLogin = async () => {
     if (!auth) {
@@ -101,7 +126,10 @@ export default function Dashboard() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({ repo_urls: filteredUrls }),
+        body: JSON.stringify({ 
+          repo_urls: filteredUrls,
+          project_name: projectName.trim() || null
+        }),
       });
       
       if (!res.ok) {
@@ -178,11 +206,20 @@ export default function Dashboard() {
     );
   }
 
+  const githubUsername = user ? (user as any).reloadUserInfo?.screenName : null;
+  const displayLabel = user
+    ? user.isAnonymous
+      ? "Guest User"
+      : githubUsername
+        ? `GitHub: @${githubUsername}`
+        : (user.displayName || user.email || "GitHub User")
+    : "";
+
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 relative">
       <div className="absolute top-4 right-4 flex items-center gap-4">
         <span className="text-sm text-gray-600">
-          {user.isAnonymous ? "Guest User" : user.displayName || user.email}
+          {displayLabel}
         </span>
         <button onClick={handleLogout} className="text-sm text-red-500 hover:underline">Logout</button>
       </div>
@@ -190,6 +227,17 @@ export default function Dashboard() {
       <div className="bg-white p-8 rounded-xl shadow-lg max-w-lg w-full mt-10">
         <h1 className="text-2xl font-bold mb-2 text-center text-gray-800">Architecture as a World</h1>
         <p className="text-gray-500 text-center mb-8 text-sm">Enter the GitHub repository clone URLs you want to analyze.</p>
+        
+        <div className="mb-5">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Project Name (Optional)</label>
+          <input
+            type="text"
+            className="w-full border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            placeholder="My Microservices Project"
+          />
+        </div>
         
         <div className="mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-2">Repository URLs</label>
@@ -242,6 +290,37 @@ export default function Dashboard() {
         {error && (
           <div className="mt-4 p-3 bg-red-50 text-red-700 text-sm rounded-md break-words">
             {error}
+          </div>
+        )}
+
+        {projects.length > 0 && (
+          <div className="mt-8 pt-6 border-t border-gray-100">
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">Your Past Worlds</h2>
+            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+              {projects.map((proj) => (
+                <div
+                  key={proj.id}
+                  onClick={() => router.push(`/project/${proj.id}`)}
+                  className="flex justify-between items-center p-3 rounded-lg border border-gray-200 hover:border-blue-500 hover:bg-blue-50/20 cursor-pointer transition-all"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-gray-800 truncate">
+                      {proj.name || `World (${proj.id.substring(0, 8)})`}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {proj.created_at ? new Date(proj.created_at).toLocaleDateString() : ""}
+                    </div>
+                  </div>
+                  <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
+                    proj.status === 'ready' ? 'bg-green-50 text-green-700 border border-green-200' :
+                    proj.status === 'analyzing' ? 'bg-blue-50 text-blue-700 border border-blue-200 animate-pulse' :
+                    'bg-red-50 text-red-700 border border-red-200'
+                  }`}>
+                    {proj.status}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

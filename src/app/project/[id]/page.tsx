@@ -24,6 +24,7 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [repositories, setRepositories] = useState<any[]>([]);
+  const [projectName, setProjectName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,6 +104,7 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
         setNodes(initialNodes);
         setEdges(initialEdges);
         setRepositories(data.repositories || []);
+        setProjectName(data.name || null);
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -187,7 +189,7 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
           <Link href="/" className="text-blue-500 text-sm font-medium hover:underline mb-2 inline-block">
             &larr; Back to Dashboard
           </Link>
-          <h1 className="text-xl font-bold text-gray-800">Architecture World</h1>
+          <h1 className="text-xl font-bold text-gray-800">{projectName || "Architecture World"}</h1>
           <p className="text-sm text-gray-500">Project ID: {projectId}</p>
           {loading && <p className="text-sm text-blue-500 mt-2">Loading world...</p>}
           {error && <p className="text-sm text-red-500 mt-2">Error: {error}</p>}
