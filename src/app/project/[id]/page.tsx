@@ -19,6 +19,24 @@ import ReactMarkdown from "react-markdown";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+const getComponentSizes = (scaleTier?: number) => {
+  const tier = scaleTier || 3;
+  switch (tier) {
+    case 1:
+      return { nodeWidth: 140, imageSize: 100, fontSize: "text-xs" };
+    case 2:
+      return { nodeWidth: 170, imageSize: 130, fontSize: "text-xs" };
+    case 3:
+      return { nodeWidth: 200, imageSize: 160, fontSize: "text-sm" };
+    case 4:
+      return { nodeWidth: 230, imageSize: 190, fontSize: "text-sm" };
+    case 5:
+      return { nodeWidth: 260, imageSize: 220, fontSize: "text-base" };
+    default:
+      return { nodeWidth: 200, imageSize: 160, fontSize: "text-sm" };
+  }
+};
+
 export default function ProjectView({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const projectId = resolvedParams.id;
@@ -59,36 +77,41 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
           const x = (ms.position?.x === 0 && ms.position?.y === 0) ? 100 + (index * 220) : ms.position?.x || 0;
           const y = (ms.position?.x === 0 && ms.position?.y === 0) ? 100 + ((index % 2) * 150) : ms.position?.y || 0;
           
+          const { nodeWidth, imageSize, fontSize } = getComponentSizes(ms.scale_tier);
+          
           return {
-          id: ms.id,
-          position: { x, y },
-          data: {
-            msData: ms, // Store raw data for chat drawer
-            label: (
-              <div className="flex flex-col items-center p-2">
-                <img
-                  src={ms.avatar_image_url || "https://placehold.co/150/000000/FFFFFF.png?text=?"}
-                  alt={ms.name}
-                  className="w-20 h-20 rounded-full mb-2 bg-black object-cover"
-                />
-                <span className="font-bold text-sm text-center">{ms.name}</span>
-                {ms.description && (
-                  <span className="text-xs text-gray-500 text-center mt-1 line-clamp-2">
-                    {ms.description}
-                  </span>
-                )}
-              </div>
-            ),
-          },
-          style: {
-            width: 180,
-            background: "#ffffff",
-            border: "1px solid #e2e8f0",
-            borderRadius: "12px",
-            boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)",
-          },
-        }
-      });
+            id: ms.id,
+            position: { x, y },
+            data: {
+              msData: ms, // Store raw data for chat drawer
+              label: (
+                <div className="flex flex-col items-center group cursor-pointer w-full">
+                  <img
+                    src={ms.avatar_image_url || "https://placehold.co/150/000000/FFFFFF.png?text=?"}
+                    alt={ms.name}
+                    style={{ width: imageSize, height: imageSize }}
+                    className="mb-2 object-contain filter drop-shadow-[0_8px_16px_rgba(0,0,0,0.25)] transition-all duration-300 group-hover:scale-110 group-hover:drop-shadow-[0_12px_20px_rgba(0,0,0,0.35)]"
+                  />
+                  <div className="bg-white/95 backdrop-blur-sm border border-slate-200/80 rounded-xl p-2.5 shadow-md flex flex-col items-center w-full transition-all duration-300 group-hover:border-blue-300 group-hover:shadow-lg">
+                    <span className={`font-bold ${fontSize} text-slate-800 text-center line-clamp-1`}>{ms.name}</span>
+                    {ms.description && (
+                      <span className="text-[10px] text-slate-500 text-center mt-1 line-clamp-2 leading-tight">
+                        {ms.description}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ),
+            },
+            style: {
+              width: nodeWidth,
+              background: "transparent",
+              border: "none",
+              boxShadow: "none",
+              padding: 0,
+            },
+          };
+        });
 
         const initialEdges: Edge[] = (data.dependencies || []).map((dep: any) => ({
           id: dep.id,
