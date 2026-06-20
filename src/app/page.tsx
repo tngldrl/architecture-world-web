@@ -18,6 +18,8 @@ export default function Dashboard() {
 
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [installationId, setInstallationId] = useState<string | null>(null);
+  const [installUrl, setInstallUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!auth) {
@@ -36,6 +38,67 @@ export default function Dashboard() {
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const instId = params.get("installation_id");
+      if (instId) {
+        setInstallationId(instId);
+        localStorage.setItem("github_installation_id", instId);
+        
+        // Clean URL params
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+      } else {
+        const cached = localStorage.getItem("github_installation_id");
+        if (cached) {
+          setInstallationId(cached);
+        }
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user && !user.isAnonymous && installationId) {
+      async function saveInstallation() {
+        try {
+          const token = await user.getIdToken();
+          await fetch(`${API_BASE_URL}/api/github-app/save-installation`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({ installation_id: installationId })
+          });
+        } catch (err) {
+          console.error("Failed to save github app installation", err);
+        }
+      }
+      saveInstallation();
+    }
+  }, [user, installationId]);
+
+  useEffect(() => {
+    if (user && !user.isAnonymous) {
+      async function fetchInstallUrl() {
+        try {
+          const token = await user.getIdToken();
+          const res = await fetch(`${API_BASE_URL}/api/github-app/install-url`, {
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setInstallUrl(data.install_url);
+          }
+        } catch (err) {
+          console.error("Failed to fetch GitHub App install url", err);
+        }
+      }
+      fetchInstallUrl();
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!user) {
@@ -130,7 +193,8 @@ export default function Dashboard() {
         },
         body: JSON.stringify({ 
           repo_urls: filteredUrls,
-          project_name: projectName.trim() || null
+          project_name: projectName.trim() || null,
+          github_installation_id: installationId || null
         }),
       });
       
@@ -228,7 +292,42 @@ export default function Dashboard() {
       
       <div className="bg-white p-8 rounded-xl shadow-lg max-w-lg w-full mt-10">
         <h1 className="text-2xl font-bold mb-2 text-center text-gray-800">Architecture as a World</h1>
-        <p className="text-gray-500 text-center mb-8 text-sm">Enter the GitHub repository clone URLs you want to analyze.</p>
+        <p className="text-gray-500 text-center mb-6 text-sm">Enter the GitHub repository clone URLs you want to analyze.</p>
+        
+        {user && !user.isAnonymous && (
+          <div className="mb-6 p-4 rounded-xl border border-gray-100 bg-gray-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
+            <div>
+              {installationId ? (
+                <div className="flex items-center gap-1.5 text-green-600 font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                  GitHub App Connected (ID: {installationId})
+                </div>
+              ) : (
+                <div className="text-gray-500">
+                  {installUrl ? "Connect GitHub App to analyze private repositories." : "GitHub App is not configured. Set GITHUB_APP_INSTALL_URL in backend env."}
+                </div>
+              )}
+            </div>
+            {installUrl ? (
+              <a
+                href={installUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center bg-gray-900 hover:bg-gray-800 text-white font-medium px-3 py-1.5 rounded-md transition-all self-start sm:self-auto"
+              >
+                {installationId ? "Reconnect" : "Connect GitHub App"}
+              </a>
+            ) : (
+              <button
+                disabled
+                className="inline-flex items-center justify-center bg-gray-300 text-gray-400 font-medium px-3 py-1.5 rounded-md cursor-not-allowed self-start sm:self-auto"
+                title="GitHub App is not configured on the API server."
+              >
+                Connect GitHub App
+              </button>
+            )}
+          </div>
+        )}
         
         <div className="mb-5">
           <label className="block text-sm font-medium text-gray-700 mb-2">Project Name (Optional)</label>
