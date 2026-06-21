@@ -336,6 +336,18 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
                   {selectedMs.description}
                 </div>
               )}
+              {selectedMs.technologies && selectedMs.technologies.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {selectedMs.technologies.map((tech: string, i: number) => (
+                    <span
+                      key={i}
+                      className="px-2 py-0.5 text-[10px] font-medium text-slate-600 bg-slate-100 border border-slate-200/60 rounded-md transition-colors hover:bg-slate-200"
+                    >
+                      {tech}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
