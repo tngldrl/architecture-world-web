@@ -1,16 +1,72 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { auth, GithubAuthProvider, signInWithPopup, signInAnonymously, onAuthStateChanged, signOut } from "../lib/firebase";
 import type { User } from "firebase/auth";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface Project {
+  id: string;
+  name: string | null;
+  status: string;
+  has_update: boolean;
+  created_at: string | null;
+}
+
+interface RepositoryInput {
+  url: string;
+  webhook_enabled: boolean;
+  watch_branch: string;
+  has_webhook_access?: boolean | null;
+  checking_access?: boolean;
+}
+
+
+interface WebhookDelivery {
+  id: string;
+  repository_url: string | null;
+  project_id: string;
+  branch: string;
+  commit_sha: string | null;
+  received_at: string | null;
+}
+
+// ─── Helper ───────────────────────────────────────────────────────────────────
+
+function repoDisplayName(url: string | null): string {
+  if (!url) return "Unknown";
+  try {
+    const parts = url.replace(/\.git$/, "").split("/");
+    return parts.slice(-2).join("/");
+  } catch {
+    return url;
+  }
+}
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 export default function Dashboard() {
-  const [repoUrls, setRepoUrls] = useState<string[]>(["https://github.com/GoogleCloudPlatform/microservices-demo.git"]);
+  const [repositories, setRepositories] = useState<RepositoryInput[]>([
+    { url: "https://github.com/GoogleCloudPlatform/microservices-demo.git", webhook_enabled: false, watch_branch: "", has_webhook_access: null, checking_access: false },
+  ]);
+
   const [projectName, setProjectName] = useState("");
-  const [projects, setProjects] = useState<any[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -21,11 +77,29 @@ export default function Dashboard() {
   const [installationId, setInstallationId] = useState<string | null>(null);
   const [installUrl, setInstallUrl] = useState<string | null>(null);
 
+  // News feed state
+  const [newsFeedOpen, setNewsFeedOpen] = useState(false);
+  const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
+  const checkTimers = useRef<{ [key: number]: ReturnType<typeof setTimeout> }>({});
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Trigger initial access checks for pre-filled repositories
   useEffect(() => {
-    if (!auth) {
-      setAuthLoading(false);
-      return;
+    if (user) {
+      repositories.forEach((repo, idx) => {
+        if (repo.url.trim() && repo.has_webhook_access === null) {
+          triggerAccessCheck(idx, repo.url);
+        }
+      });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+
+  // ─── Auth & init ─────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!auth) { setAuthLoading(false); return; }
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u && !u.isAnonymous) {
@@ -46,15 +120,10 @@ export default function Dashboard() {
       if (instId) {
         setInstallationId(instId);
         localStorage.setItem("github_installation_id", instId);
-        
-        // Clean URL params
-        const newUrl = window.location.pathname;
-        window.history.replaceState({}, document.title, newUrl);
+        window.history.replaceState({}, document.title, window.location.pathname);
       } else {
         const cached = localStorage.getItem("github_installation_id");
-        if (cached) {
-          setInstallationId(cached);
-        }
+        if (cached) setInstallationId(cached);
       }
     }
   }, []);
@@ -67,15 +136,10 @@ export default function Dashboard() {
           const token = await currentUser.getIdToken();
           await fetch(`${API_BASE_URL}/api/github-app/save-installation`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${token}`
-            },
-            body: JSON.stringify({ installation_id: installationId })
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ installation_id: installationId }),
           });
-        } catch (err) {
-          console.error("Failed to save github app installation", err);
-        }
+        } catch (err) { console.error("Failed to save github app installation", err); }
       }
       saveInstallation();
     }
@@ -88,98 +152,210 @@ export default function Dashboard() {
         try {
           const token = await currentUser.getIdToken();
           const res = await fetch(`${API_BASE_URL}/api/github-app/install-url`, {
-            headers: { "Authorization": `Bearer ${token}` }
+            headers: { "Authorization": `Bearer ${token}` },
           });
-          if (res.ok) {
-            const data = await res.json();
-            setInstallUrl(data.install_url);
-          }
-        } catch (err) {
-          console.error("Failed to fetch GitHub App install url", err);
-        }
+          if (res.ok) { const data = await res.json(); setInstallUrl(data.install_url); }
+        } catch (err) { console.error("Failed to fetch GitHub App install url", err); }
       }
       fetchInstallUrl();
     }
   }, [user]);
 
+  // Fetch project list
   useEffect(() => {
-    if (!user) {
-      setProjects([]);
-      return;
-    }
-    
+    if (!user) { setProjects([]); return; }
     const currentUser = user;
     async function fetchProjects() {
       try {
         const token = currentUser && auth && !currentUser.isAnonymous ? await currentUser.getIdToken() : "guest";
         const res = await fetch(`${API_BASE_URL}/api/projects`, {
-          headers: { "Authorization": `Bearer ${token}` }
+          headers: { "Authorization": `Bearer ${token}` },
         });
-        if (res.ok) {
-          const data = await res.json();
-          setProjects(data || []);
-        }
-      } catch (err) {
-        console.error("Failed to fetch projects history", err);
-      }
+        if (res.ok) { const data = await res.json(); setProjects(data || []); }
+      } catch (err) { console.error("Failed to fetch projects history", err); }
     }
     fetchProjects();
   }, [user]);
 
+  // ─── News Feed polling ──────────────────────────────────────────────────
+
+  const fetchDeliveries = async () => {
+    if (!user || user.isAnonymous) return;
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/webhook-deliveries`, {
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      if (res.ok) { const data = await res.json(); setDeliveries(data || []); }
+    } catch (err) { console.error("Failed to fetch webhook deliveries", err); }
+  };
+
+  useEffect(() => {
+    if (!user || user.isAnonymous) return;
+    fetchDeliveries();
+    pollTimerRef.current = setInterval(fetchDeliveries, 30000);
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // ─── Auth handlers ───────────────────────────────────────────────────────
+
   const handleGitHubLogin = async () => {
-    if (!auth) {
-      setError("Firebase is not configured. Please set environment variables.");
-      return;
-    }
+    if (!auth) { setError("Firebase is not configured. Please set environment variables."); return; }
     try {
       const provider = new GithubAuthProvider();
       await signInWithPopup(auth, provider);
-    } catch (err: any) {
-      setError("GitHub Login failed: " + err.message);
-    }
+    } catch (err: any) { setError("GitHub Login failed: " + err.message); }
   };
 
   const handleGuestLogin = async () => {
-    if (!auth) {
-      // Just mock user if Firebase isn't configured
-      setUser({ isAnonymous: true, uid: 'mock-guest' } as any);
-      return;
-    }
-    try {
-      await signInAnonymously(auth);
-    } catch (err: any) {
-      setError("Guest Login failed: " + err.message);
-    }
+    if (!auth) { setUser({ isAnonymous: true, uid: "mock-guest" } as any); return; }
+    try { await signInAnonymously(auth); }
+    catch (err: any) { setError("Guest Login failed: " + err.message); }
   };
 
   const handleLogout = async () => {
-    if (auth) {
-      await signOut(auth);
-    } else {
-      setUser(null);
+    if (auth) { await signOut(auth); } else { setUser(null); }
+  };
+
+  // ─── Repository input handlers ───────────────────────────────────────────
+
+  const triggerAccessCheck = (idx: number, val: string) => {
+    const cleanUrl = val.trim().replace(/\.git$/, "");
+    const githubUrlRegex = /^(https:\/\/github\.com\/|git@github\.com:)[^\/]+\/[^\/]+$/;
+
+    if (!githubUrlRegex.test(cleanUrl)) {
+      setRepositories(prev => {
+        if (prev[idx]) {
+          const updated = [...prev];
+          updated[idx] = { ...updated[idx], has_webhook_access: false, checking_access: false };
+          return updated;
+        }
+        return prev;
+      });
+      return;
     }
+
+    setRepositories(prev => {
+      if (prev[idx]) {
+        const updated = [...prev];
+        updated[idx] = { ...updated[idx], checking_access: true };
+        return updated;
+      }
+      return prev;
+    });
+
+    if (checkTimers.current[idx]) {
+      clearTimeout(checkTimers.current[idx]);
+    }
+
+    checkTimers.current[idx] = setTimeout(async () => {
+      try {
+        const token = user && auth && !user.isAnonymous ? await user.getIdToken() : "guest";
+        const payload: any = { url: val.trim() };
+        if (installationId) {
+          payload.installation_id = installationId;
+        }
+
+        const res = await fetch(`${API_BASE_URL}/api/github-app/check-access`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setRepositories(prev => {
+            if (prev[idx] && prev[idx].url === val) {
+              const updated = [...prev];
+              updated[idx] = {
+                ...updated[idx],
+                has_webhook_access: data.has_access,
+                checking_access: false
+              };
+              return updated;
+            }
+            return prev;
+          });
+        } else {
+          setRepositories(prev => {
+            if (prev[idx] && prev[idx].url === val) {
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], has_webhook_access: false, checking_access: false };
+              return updated;
+            }
+            return prev;
+          });
+        }
+      } catch (err) {
+        console.error("Failed to check repository access", err);
+        setRepositories(prev => {
+          if (prev[idx] && prev[idx].url === val) {
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], has_webhook_access: false, checking_access: false };
+            return updated;
+          }
+          return prev;
+        });
+      }
+    }, 600);
   };
 
   const handleUrlChange = (idx: number, val: string) => {
-    const newUrls = [...repoUrls];
-    newUrls[idx] = val;
-    setRepoUrls(newUrls);
+    const next = [...repositories];
+    next[idx] = {
+      ...next[idx],
+      url: val,
+      webhook_enabled: false,
+      watch_branch: "",
+      has_webhook_access: null,
+      checking_access: false
+    };
+    setRepositories(next);
+    triggerAccessCheck(idx, val);
+  };
+
+  const handleWebhookToggle = (idx: number, checked: boolean) => {
+    const next = [...repositories];
+    next[idx] = { ...next[idx], webhook_enabled: checked, watch_branch: checked ? next[idx].watch_branch : "" };
+    setRepositories(next);
+  };
+
+  const handleBranchChange = (idx: number, val: string) => {
+    const next = [...repositories];
+    next[idx] = { ...next[idx], watch_branch: val };
+    setRepositories(next);
   };
 
   const handleAddUrl = () => {
-    setRepoUrls([...repoUrls, ""]);
+    setRepositories([...repositories, { url: "", webhook_enabled: false, watch_branch: "", has_webhook_access: null, checking_access: false }]);
   };
 
   const handleRemoveUrl = (idx: number) => {
-    const newUrls = repoUrls.filter((_, i) => i !== idx);
-    setRepoUrls(newUrls);
+    if (checkTimers.current[idx]) {
+      clearTimeout(checkTimers.current[idx]);
+    }
+    setRepositories(repositories.filter((_, i) => i !== idx));
   };
 
+
+  // ─── Generate handler ────────────────────────────────────────────────────
+
   const handleGenerate = async () => {
-    const filteredUrls = repoUrls.map(u => u.trim()).filter(Boolean);
-    if (filteredUrls.length === 0) {
-      setError("Please enter at least one repository URL.");
-      return;
+    const filteredRepos = repositories.filter(r => r.url.trim());
+    if (filteredRepos.length === 0) { setError("Please enter at least one repository URL."); return; }
+
+    // Validate webhook settings
+    for (const r of filteredRepos) {
+      if (r.webhook_enabled && !r.watch_branch.trim()) {
+        setError(`Please enter a branch name for update notifications on: ${r.url}`);
+        return;
+      }
     }
 
     setLoading(true);
@@ -187,56 +363,41 @@ export default function Dashboard() {
     setStatus("Starting analysis...");
     try {
       const token = user && auth && !user.isAnonymous ? await user.getIdToken() : "guest";
-      
       const res = await fetch(`${API_BASE_URL}/api/projects/analyze`, {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({ 
-          repo_urls: filteredUrls,
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({
+          repositories: filteredRepos.map(r => ({
+            url: r.url.trim(),
+            webhook_enabled: r.webhook_enabled,
+            watch_branch: r.webhook_enabled ? r.watch_branch.trim() : null,
+          })),
           project_name: projectName.trim() || null,
-          github_installation_id: installationId || null
+          github_installation_id: installationId || null,
         }),
       });
-      
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
-      
+      if (!res.ok) { throw new Error(await res.text()); }
       const data = await res.json();
       const projectId = data.project_id;
-      
+
       setStatus("Analyzing code and generating avatars (this may take a few minutes)...");
-      
-      // Poll for completion
+
       const interval = setInterval(async () => {
         try {
           const pollRes = await fetch(`${API_BASE_URL}/api/projects/${projectId}`, {
-            headers: { "Authorization": `Bearer ${token}` }
+            headers: { "Authorization": `Bearer ${token}` },
           });
           if (pollRes.ok) {
             const pollData = await pollRes.json();
-            if (pollData.status === "ready") {
-              clearInterval(interval);
-              router.push(`/project/${projectId}`);
-            } else if (pollData.status === "error") {
-              clearInterval(interval);
-              setError("Analysis failed on the server.");
-              setLoading(false);
-            }
+            if (pollData.status === "ready") { clearInterval(interval); router.push(`/project/${projectId}`); }
+            else if (pollData.status === "error") { clearInterval(interval); setError("Analysis failed on the server."); setLoading(false); }
           }
-        } catch (e) {
-          console.error("Polling error", e);
-        }
+        } catch (e) { console.error("Polling error", e); }
       }, 5000);
-      
-    } catch (err: any) {
-      setError(err.message);
-      setLoading(false);
-    }
+    } catch (err: any) { setError(err.message); setLoading(false); }
   };
+
+  // ─── Auth screen ─────────────────────────────────────────────────────────
 
   if (authLoading) {
     return <main className="min-h-screen bg-gray-50 flex items-center justify-center">Loading...</main>;
@@ -248,27 +409,17 @@ export default function Dashboard() {
         <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full">
           <h1 className="text-3xl font-bold mb-6 text-center text-gray-800">Architecture World</h1>
           <p className="text-gray-500 text-center mb-8 text-sm">Visualize your microservices as a living ecosystem.</p>
-          
-          <button
-            onClick={handleGitHubLogin}
-            className="w-full bg-gray-900 text-white font-medium py-3 rounded-md mb-4 hover:bg-gray-800 transition-colors flex justify-center items-center gap-2"
-          >
+          <button onClick={handleGitHubLogin} className="w-full bg-gray-900 text-white font-medium py-3 rounded-md mb-4 hover:bg-gray-800 transition-colors flex justify-center items-center gap-2">
             Sign in with GitHub
           </button>
-          
           <div className="relative flex py-5 items-center">
             <div className="flex-grow border-t border-gray-300"></div>
             <span className="flex-shrink-0 mx-4 text-gray-400 text-sm">Or</span>
             <div className="flex-grow border-t border-gray-300"></div>
           </div>
-          
-          <button
-            onClick={handleGuestLogin}
-            className="w-full bg-blue-50 text-blue-600 font-medium py-3 rounded-md border border-blue-200 hover:bg-blue-100 transition-colors"
-          >
+          <button onClick={handleGuestLogin} className="w-full bg-blue-50 text-blue-600 font-medium py-3 rounded-md border border-blue-200 hover:bg-blue-100 transition-colors">
             Try Demo as Guest
           </button>
-          
           {error && <p className="mt-4 text-red-500 text-sm text-center">{error}</p>}
         </div>
       </main>
@@ -277,26 +428,82 @@ export default function Dashboard() {
 
   const githubUsername = user ? (user as any).reloadUserInfo?.screenName : null;
   const displayLabel = user
-    ? user.isAnonymous
-      ? "Guest User"
-      : githubUsername
-        ? `GitHub: @${githubUsername}`
-        : (user.displayName || user.email || "GitHub User")
+    ? user.isAnonymous ? "Guest User"
+    : githubUsername ? `GitHub: @${githubUsername}`
+    : (user.displayName || user.email || "GitHub User")
     : "";
+
+  // ─── Main dashboard ──────────────────────────────────────────────────────
 
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 relative">
-      <div className="absolute top-4 right-4 flex items-center gap-4">
-        <span className="text-sm text-gray-600">
-          {displayLabel}
-        </span>
+
+      {/* ── Top-right: user info + news feed bell ── */}
+      <div className="absolute top-4 right-4 flex items-center gap-3">
+        {/* News Feed Button (only for logged-in non-guest) */}
+        {user && !user.isAnonymous && (
+          <div className="relative">
+            <button
+              id="news-feed-toggle"
+              onClick={() => setNewsFeedOpen(v => !v)}
+              className="relative p-2 rounded-full hover:bg-gray-200 transition-colors text-gray-600"
+              title="Push Notifications"
+            >
+              {/* Bell icon */}
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              {deliveries.length > 0 && (
+                <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-emerald-500 rounded-full border border-white"></span>
+              )}
+            </button>
+
+            {/* News Feed Dropdown */}
+            {newsFeedOpen && (
+              <div className="absolute right-0 top-10 w-80 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                  <span className="text-sm font-semibold text-gray-800">Push Notifications</span>
+                  <button onClick={() => setNewsFeedOpen(false)} className="text-gray-400 hover:text-gray-600 text-lg font-bold leading-none">&times;</button>
+                </div>
+                <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
+                  {deliveries.length === 0 ? (
+                    <p className="text-xs text-gray-400 text-center py-8 px-4">
+                      Connected repositories will appear here when a push event is received.
+                    </p>
+                  ) : (
+                    deliveries.map(d => (
+                      <div key={d.id} className="px-4 py-3 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-gray-700 truncate">{repoDisplayName(d.repository_url)}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              <span className="font-mono bg-gray-100 px-1 rounded text-[10px]">{d.branch}</span>
+                              {d.commit_sha && (
+                                <span className="ml-1.5 font-mono text-[10px] text-gray-400">{d.commit_sha.substring(0, 7)}</span>
+                              )}
+                            </p>
+                          </div>
+                          <span className="text-[10px] text-gray-400 whitespace-nowrap flex-shrink-0 mt-0.5">{timeAgo(d.received_at)}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <span className="text-sm text-gray-600">{displayLabel}</span>
         <button onClick={handleLogout} className="text-sm text-red-500 hover:underline">Logout</button>
       </div>
-      
+
+      {/* ── Main card ── */}
       <div className="bg-white p-8 rounded-xl shadow-lg max-w-lg w-full mt-10">
         <h1 className="text-2xl font-bold mb-2 text-center text-gray-800">Architecture as a World</h1>
         <p className="text-gray-500 text-center mb-6 text-sm">Enter the GitHub repository clone URLs you want to analyze.</p>
-        
+
+        {/* GitHub App connection */}
         {user && !user.isAnonymous && (
           <div className="mb-6 p-4 rounded-xl border border-gray-100 bg-gray-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
             <div>
@@ -312,113 +519,143 @@ export default function Dashboard() {
               )}
             </div>
             {installUrl ? (
-              <a
-                href={installUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center bg-gray-900 hover:bg-gray-800 text-white font-medium px-3 py-1.5 rounded-md transition-all self-start sm:self-auto"
-              >
+              <a href={installUrl} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center justify-center bg-gray-900 hover:bg-gray-800 text-white font-medium px-3 py-1.5 rounded-md transition-all self-start sm:self-auto">
                 {installationId ? "Reconnect" : "Connect GitHub App"}
               </a>
             ) : (
-              <button
-                disabled
-                className="inline-flex items-center justify-center bg-gray-300 text-gray-400 font-medium px-3 py-1.5 rounded-md cursor-not-allowed self-start sm:self-auto"
-                title="GitHub App is not configured on the API server."
-              >
+              <button disabled className="inline-flex items-center justify-center bg-gray-300 text-gray-400 font-medium px-3 py-1.5 rounded-md cursor-not-allowed self-start sm:self-auto"
+                title="GitHub App is not configured on the API server.">
                 Connect GitHub App
               </button>
             )}
           </div>
         )}
-        
+
+        {/* Project name */}
         <div className="mb-5">
           <label className="block text-sm font-medium text-gray-700 mb-2">Project Name (Optional)</label>
-          <input
-            type="text"
+          <input type="text"
             className="w-full border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
             placeholder="My Microservices Project"
           />
         </div>
-        
+
+        {/* Repository URLs with webhook settings */}
         <div className="mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-2">Repository URLs</label>
-          {repoUrls.map((url, idx) => (
-            <div key={idx} className="flex gap-2 mb-3 items-center">
-              <input
-                type="text"
-                className="flex-grow border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                value={url}
-                onChange={(e) => handleUrlChange(idx, e.target.value)}
-                placeholder="https://github.com/owner/repo.git"
-              />
-              {repoUrls.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => handleRemoveUrl(idx)}
-                  className="text-red-500 hover:text-red-700 text-sm font-bold p-2"
-                >
-                  ✕
-                </button>
+          {repositories.map((repo, idx) => (
+            <div key={idx} className="mb-4 border border-gray-200 rounded-lg p-3 bg-gray-50/30">
+              {/* URL row */}
+              <div className="flex gap-2 items-center">
+                <input
+                  type="text"
+                  className="flex-grow border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                  value={repo.url}
+                  onChange={(e) => handleUrlChange(idx, e.target.value)}
+                  placeholder="https://github.com/owner/repo.git"
+                />
+                {repositories.length > 1 && (
+                  <button type="button" onClick={() => handleRemoveUrl(idx)}
+                    className="text-red-400 hover:text-red-600 font-bold p-2 transition-colors">✕</button>
+                )}
+              </div>
+
+              {/* Checking indicator */}
+              {repo.checking_access && (
+                <div className="mt-2 flex items-center gap-1.5 text-xs text-blue-500">
+                  <span className="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></span>
+                  Checking webhook access...
+                </div>
               )}
+
+              {/* Webhook toggle – render conditionally based on access */}
+              {repo.has_webhook_access && !repo.checking_access && (
+                <div className="mt-2.5 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id={`webhook-enabled-${idx}`}
+                    checked={repo.webhook_enabled}
+                    onChange={(e) => handleWebhookToggle(idx, e.target.checked)}
+                    className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
+                  />
+                  <label htmlFor={`webhook-enabled-${idx}`} className="text-xs text-gray-600 cursor-pointer select-none">
+                    Receive update notifications on push
+                  </label>
+                </div>
+              )}
+
+
+              {/* Branch input – animates in/out */}
+              <div
+                className={`overflow-hidden transition-all duration-200 ${repo.webhook_enabled ? "max-h-16 opacity-100 mt-2" : "max-h-0 opacity-0"}`}
+              >
+                <input
+                  type="text"
+                  className="w-full border border-emerald-300 rounded-md p-2 text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none bg-white placeholder-gray-400"
+                  value={repo.watch_branch}
+                  onChange={(e) => handleBranchChange(idx, e.target.value)}
+                  placeholder="Branch to monitor (e.g. main)"
+                  disabled={!repo.webhook_enabled}
+                />
+              </div>
             </div>
           ))}
-          <button
-            type="button"
-            onClick={handleAddUrl}
-            className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1 mt-2"
-          >
+          <button type="button" onClick={handleAddUrl}
+            className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1 mt-1">
             + Add Repository
           </button>
         </div>
-        
-        <button
-          onClick={handleGenerate}
-          disabled={loading}
-          className={`w-full py-3 rounded-md font-medium text-white transition-colors ${
-            loading ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
-          }`}
-        >
+
+        {/* Generate button */}
+        <button onClick={handleGenerate} disabled={loading}
+          className={`w-full py-3 rounded-md font-medium text-white transition-colors ${loading ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}>
           {loading ? "Processing..." : "Generate World"}
         </button>
-        
+
         {status && loading && (
           <div className="mt-4 text-sm text-blue-600 text-center flex flex-col items-center animate-pulse">
             <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-2"></div>
             {status}
           </div>
         )}
-        
+
         {error && (
-          <div className="mt-4 p-3 bg-red-50 text-red-700 text-sm rounded-md break-words">
-            {error}
-          </div>
+          <div className="mt-4 p-3 bg-red-50 text-red-700 text-sm rounded-md break-words">{error}</div>
         )}
 
+        {/* Your Past Worlds */}
         {projects.length > 0 && (
           <div className="mt-8 pt-6 border-t border-gray-100">
             <h2 className="text-sm font-semibold text-gray-700 mb-3">Your Past Worlds</h2>
             <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
               {projects.map((proj) => (
-                <div
-                  key={proj.id}
+                <div key={proj.id}
                   onClick={() => router.push(`/project/${proj.id}`)}
-                  className="flex justify-between items-center p-3 rounded-lg border border-gray-200 hover:border-blue-500 hover:bg-blue-50/20 cursor-pointer transition-all"
-                >
+                  className="flex justify-between items-center p-3 rounded-lg border border-gray-200 hover:border-blue-500 hover:bg-blue-50/20 cursor-pointer transition-all">
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-gray-800 truncate">
-                      {proj.name || `World (${proj.id.substring(0, 8)})`}
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-800 truncate">
+                        {proj.name || `World (${proj.id.substring(0, 8)})`}
+                      </span>
+                      {/* New Update badge */}
+                      {proj.has_update && (
+                        <span className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          New Update
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-gray-400 mt-0.5">
                       {proj.created_at ? new Date(proj.created_at).toLocaleDateString() : ""}
                     </div>
                   </div>
-                  <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
-                    proj.status === 'ready' ? 'bg-green-50 text-green-700 border border-green-200' :
-                    proj.status === 'analyzing' ? 'bg-blue-50 text-blue-700 border border-blue-200 animate-pulse' :
-                    'bg-red-50 text-red-700 border border-red-200'
+                  <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ml-2 ${
+                    proj.status === "ready" ? "bg-green-50 text-green-700 border border-green-200" :
+                    proj.status === "analyzing" ? "bg-blue-50 text-blue-700 border border-blue-200 animate-pulse" :
+                    "bg-red-50 text-red-700 border border-red-200"
                   }`}>
                     {proj.status}
                   </span>

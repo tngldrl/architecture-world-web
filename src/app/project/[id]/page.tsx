@@ -47,6 +47,8 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
   const [projectName, setProjectName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasUpdate, setHasUpdate] = useState(false);
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
 
   // Chat drawer state
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -130,6 +132,7 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
         setEdges(initialEdges);
         setRepositories(data.repositories || []);
         setProjectName(data.name || null);
+        setHasUpdate(data.has_update ?? false);
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -172,6 +175,45 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
       console.error("Failed to load chat history", err);
     } finally {
       setIsChatLoading(false);
+    }
+  };
+
+  const handleUpdate = async () => {
+    setIsReanalyzing(true);
+    setHasUpdate(false); // Optimistic reset
+    try {
+      const token = localStorage.getItem("firebase_token") || "guest";
+      const res = await fetch(`${API_BASE_URL}/api/projects/${projectId}/re-analyze`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(await res.text());
+
+      // Poll until ready
+      const interval = setInterval(async () => {
+        try {
+          const pollRes = await fetch(`${API_BASE_URL}/api/projects/${projectId}`, {
+            headers: { "Authorization": `Bearer ${token}` },
+          });
+          if (pollRes.ok) {
+            const pollData = await pollRes.json();
+            if (pollData.status === "ready") {
+              clearInterval(interval);
+              setIsReanalyzing(false);
+              // Reload the page to re-render fresh architecture data
+              window.location.reload();
+            } else if (pollData.status === "error") {
+              clearInterval(interval);
+              setIsReanalyzing(false);
+              setError("Re-analysis failed on the server.");
+            }
+          }
+        } catch (e) { console.error("Re-analysis polling error", e); }
+      }, 5000);
+    } catch (err: any) {
+      setIsReanalyzing(false);
+      setHasUpdate(true); // Restore if failed
+      setError("Failed to trigger re-analysis: " + err.message);
     }
   };
 
@@ -218,6 +260,32 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
           <p className="text-sm text-gray-500">Project ID: {projectId}</p>
           {loading && <p className="text-sm text-blue-500 mt-2">Loading world...</p>}
           {error && <p className="text-sm text-red-500 mt-2">Error: {error}</p>}
+
+          {/* Update button – only shown when has_update is true */}
+          {(hasUpdate || isReanalyzing) && (
+            <button
+              id="update-project-btn"
+              onClick={handleUpdate}
+              disabled={isReanalyzing}
+              className={`mt-3 w-full flex items-center justify-center gap-2 py-2 px-4 rounded-md text-sm font-semibold transition-all ${
+                isReanalyzing
+                  ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                  : "bg-emerald-500 hover:bg-emerald-600 text-white shadow-md hover:shadow-emerald-200"
+              }`}
+            >
+              {isReanalyzing ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></span>
+                  Re-analyzing...
+                </>
+              ) : (
+                <>
+                  <span className="text-base">🔄</span>
+                  Update World
+                </>
+              )}
+            </button>
+          )}
         </div>
         
         <ReactFlow
