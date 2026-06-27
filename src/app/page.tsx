@@ -856,151 +856,165 @@ export default function Dashboard() {
       {/* ── Main card ── */}
       <div className="bg-white p-8 rounded-xl shadow-lg max-w-lg w-full mt-10">
         <h1 className="text-2xl font-bold mb-2 text-center text-gray-800">Architecture as a World</h1>
-        <p className="text-gray-500 text-center mb-6 text-sm">Enter the GitHub repository clone URLs you want to analyze.</p>
+        <p className="text-gray-500 text-center mb-6 text-sm">
+          {user?.isAnonymous
+            ? "Explore microservice templates and chat with service avatars in the demo worlds below."
+            : "Enter the GitHub repository clone URLs you want to analyze."}
+        </p>
 
-        {/* GitHub App connection */}
-        {user && !user.isAnonymous && (
-          <div className="mb-6 p-4 rounded-xl border border-gray-100 bg-gray-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
-            <div>
-              {installationId ? (
-                <div className="flex items-center gap-1.5 text-green-600 font-semibold">
-                  <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                  GitHub App Connected (ID: {installationId})
-                </div>
-              ) : (
-                <div className="text-gray-500">
-                  {installUrl ? "Connect GitHub App to analyze private repositories." : "GitHub App is not configured. Set GITHUB_APP_INSTALL_URL in backend env."}
-                </div>
-              )}
-            </div>
-            {installUrl ? (
-              <a href={installUrl} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center justify-center bg-gray-900 hover:bg-gray-800 text-white font-medium px-3 py-1.5 rounded-md transition-all self-start sm:self-auto">
-                {installationId ? "Reconnect" : "Connect GitHub App"}
-              </a>
-            ) : (
-              <button disabled className="inline-flex items-center justify-center bg-gray-300 text-gray-400 font-medium px-3 py-1.5 rounded-md cursor-not-allowed self-start sm:self-auto"
-                title="GitHub App is not configured on the API server.">
-                Connect GitHub App
-              </button>
-            )}
+        {user?.isAnonymous ? (
+          <div className="p-5 rounded-xl border border-blue-100 bg-blue-50/20 text-center text-sm text-blue-900 mb-6">
+            <p className="font-semibold mb-1">Guest Mode Active</p>
+            <p className="text-xs text-blue-700 leading-relaxed">
+              You are signed in as a guest. Project creation is disabled. Please sign in via GitHub to analyze your own repositories.
+            </p>
           </div>
-        )}
-
-        {/* Project name */}
-        <div className="mb-5">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Project Name (Optional)</label>
-          <input type="text"
-            className="w-full border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-            placeholder="My Microservices Project"
-          />
-        </div>
-
-        {/* Repository URLs with webhook settings */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Repository URLs</label>
-          {repositories.map((repo, idx) => (
-            <div key={idx} className="mb-4 border border-gray-200 rounded-lg p-3 bg-gray-50/30">
-              {/* URL row */}
-              <div className="flex gap-2 items-center">
-                <input
-                  type="text"
-                  className="flex-grow border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
-                  value={repo.url}
-                  onChange={(e) => handleUrlChange(idx, e.target.value)}
-                  placeholder="https://github.com/owner/repo.git"
-                />
-                {repositories.length > 1 && (
-                  <button type="button" onClick={() => handleRemoveUrl(idx)}
-                    className="text-red-400 hover:text-red-600 font-bold p-2 transition-colors">✕</button>
+        ) : (
+          <>
+            {/* GitHub App connection */}
+            {user && !user.isAnonymous && (
+              <div className="mb-6 p-4 rounded-xl border border-gray-100 bg-gray-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
+                <div>
+                  {installationId ? (
+                    <div className="flex items-center gap-1.5 text-green-600 font-semibold">
+                      <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                      GitHub App Connected (ID: {installationId})
+                    </div>
+                  ) : (
+                    <div className="text-gray-500">
+                      {installUrl ? "Connect GitHub App to analyze private repositories." : "GitHub App is not configured. Set GITHUB_APP_INSTALL_URL in backend env."}
+                    </div>
+                  )}
+                </div>
+                {installUrl ? (
+                  <a href={installUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center bg-gray-900 hover:bg-gray-800 text-white font-medium px-3 py-1.5 rounded-md transition-all self-start sm:self-auto">
+                    {installationId ? "Reconnect" : "Connect GitHub App"}
+                  </a>
+                ) : (
+                  <button disabled className="inline-flex items-center justify-center bg-gray-300 text-gray-400 font-medium px-3 py-1.5 rounded-md cursor-not-allowed self-start sm:self-auto"
+                    title="GitHub App is not configured on the API server.">
+                    Connect GitHub App
+                  </button>
                 )}
               </div>
+            )}
 
-              {/* Checking indicator */}
-              {repo.checking_access && (
-                <div className="mt-2 flex items-center gap-1.5 text-xs text-blue-500">
-                  <span className="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></span>
-                  Checking webhook access...
-                </div>
-              )}
-
-              {/* Webhook toggle – render conditionally based on access */}
-              {repo.has_webhook_access && !repo.checking_access && (
-                <div className="mt-2.5 flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id={`webhook-enabled-${idx}`}
-                    checked={repo.webhook_enabled}
-                    onChange={(e) => handleWebhookToggle(idx, e.target.checked)}
-                    className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
-                  />
-                  <label htmlFor={`webhook-enabled-${idx}`} className="text-xs text-gray-600 cursor-pointer select-none">
-                    Receive update notifications on push
-                  </label>
-                </div>
-              )}
-
-
-              {/* Branch input – animates in/out */}
-              <div
-                className={`overflow-hidden transition-all duration-200 ${repo.webhook_enabled ? "max-h-16 opacity-100 mt-2" : "max-h-0 opacity-0"}`}
-              >
-                <input
-                  type="text"
-                  className="w-full border border-emerald-300 rounded-md p-2 text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none bg-white placeholder-gray-400"
-                  value={repo.watch_branch}
-                  onChange={(e) => handleBranchChange(idx, e.target.value)}
-                  placeholder="Branch to monitor (e.g. main)"
-                  disabled={!repo.webhook_enabled}
-                />
-              </div>
+            {/* Project name */}
+            <div className="mb-5">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Project Name (Optional)</label>
+              <input type="text"
+                className="w-full border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="My Microservices Project"
+              />
             </div>
-          ))}
-          <button type="button" onClick={handleAddUrl}
-            className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1 mt-1">
-            + Add Repository
-          </button>
-        </div>
 
-        {/* Demo project checkbox (Admin only) */}
-        {isAdmin && (
-          <div className="mb-5 p-3 rounded-lg border border-blue-100 bg-blue-50/20 flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
-            <input
-              type="checkbox"
-              id="is-demo-checkbox"
-              checked={isDemo}
-              onChange={(e) => setIsDemo(e.target.checked)}
-              className="w-4 h-4 accent-blue-600 cursor-pointer"
-            />
-            <label htmlFor="is-demo-checkbox" className="text-sm text-blue-950 font-medium cursor-pointer select-none">
-              Register as Demo Project (Public Layout Template)
-            </label>
-          </div>
-        )}
+            {/* Repository URLs with webhook settings */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Repository URLs</label>
+              {repositories.map((repo, idx) => (
+                <div key={idx} className="mb-4 border border-gray-200 rounded-lg p-3 bg-gray-50/30">
+                  {/* URL row */}
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      className="flex-grow border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                      value={repo.url}
+                      onChange={(e) => handleUrlChange(idx, e.target.value)}
+                      placeholder="https://github.com/owner/repo.git"
+                    />
+                    {repositories.length > 1 && (
+                      <button type="button" onClick={() => handleRemoveUrl(idx)}
+                        className="text-red-400 hover:text-red-600 font-bold p-2 transition-colors">✕</button>
+                    )}
+                  </div>
 
-        {/* Generate button */}
-        <button onClick={handleGenerate} disabled={loading}
-          className={`w-full py-3 rounded-md font-medium text-white transition-colors ${loading ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}>
-          {loading ? "Processing..." : "Generate World"}
-        </button>
+                  {/* Checking indicator */}
+                  {repo.checking_access && (
+                    <div className="mt-2 flex items-center gap-1.5 text-xs text-blue-500">
+                      <span className="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></span>
+                      Checking webhook access...
+                    </div>
+                  )}
 
-        {status && loading && (
-          <div className="mt-4 text-sm text-blue-600 text-center flex flex-col items-center animate-pulse">
-            <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-2"></div>
-            {status}
-          </div>
-        )}
+                  {/* Webhook toggle – render conditionally based on access */}
+                  {repo.has_webhook_access && !repo.checking_access && (
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id={`webhook-enabled-${idx}`}
+                        checked={repo.webhook_enabled}
+                        onChange={(e) => handleWebhookToggle(idx, e.target.checked)}
+                        className="w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
+                      />
+                      <label htmlFor={`webhook-enabled-${idx}`} className="text-xs text-gray-600 cursor-pointer select-none">
+                        Receive update notifications on push
+                      </label>
+                    </div>
+                  )}
 
-        {error && (
-          <div className="mt-4 p-3 bg-red-50 text-red-700 text-sm rounded-md break-words">{error}</div>
+                  {/* Branch input – animates in/out */}
+                  <div
+                    className={`overflow-hidden transition-all duration-200 ${repo.webhook_enabled ? "max-h-16 opacity-100 mt-2" : "max-h-0 opacity-0"}`}
+                  >
+                    <input
+                      type="text"
+                      className="w-full border border-emerald-300 rounded-md p-2 text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none bg-white placeholder-gray-400"
+                      value={repo.watch_branch}
+                      onChange={(e) => handleBranchChange(idx, e.target.value)}
+                      placeholder="Branch to monitor (e.g. main)"
+                      disabled={!repo.webhook_enabled}
+                    />
+                  </div>
+                </div>
+              ))}
+              <button type="button" onClick={handleAddUrl}
+                className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1 mt-1">
+                + Add Repository
+              </button>
+            </div>
+
+            {/* Demo project checkbox (Admin only) */}
+            {isAdmin && (
+              <div className="mb-5 p-3 rounded-lg border border-blue-100 bg-blue-50/20 flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                <input
+                  type="checkbox"
+                  id="is-demo-checkbox"
+                  checked={isDemo}
+                  onChange={(e) => setIsDemo(e.target.checked)}
+                  className="w-4 h-4 accent-blue-600 cursor-pointer"
+                />
+                <label htmlFor="is-demo-checkbox" className="text-sm text-blue-950 font-medium cursor-pointer select-none">
+                  Register as Demo Project (Public Layout Template)
+                </label>
+              </div>
+            )}
+
+            {/* Generate button */}
+            <button onClick={handleGenerate} disabled={loading}
+              className={`w-full py-3 rounded-md font-medium text-white transition-colors ${loading ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}>
+              {loading ? "Processing..." : "Generate World"}
+            </button>
+
+            {status && loading && (
+              <div className="mt-4 text-sm text-blue-600 text-center flex flex-col items-center animate-pulse">
+                <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-2"></div>
+                {status}
+              </div>
+            )}
+
+            {error && (
+              <div className="mt-4 p-3 bg-red-50 text-red-700 text-sm rounded-md break-words">{error}</div>
+            )}
+          </>
         )}
 
         {/* Your Past Worlds */}
         {projects.length > 0 && (
           <div className="mt-8 pt-6 border-t border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Your Past Worlds</h2>
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">{user?.isAnonymous ? "Demo Worlds" : "Your Past Worlds"}</h2>
             <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
               {projects.map((proj) => (
                 <div key={proj.id}
@@ -1040,19 +1054,21 @@ export default function Dashboard() {
                       }`}>
                       {proj.status}
                     </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteClick(proj);
-                      }}
-                      className="text-gray-400 hover:text-red-500 p-1.5 rounded-md transition-colors ml-2 flex-shrink-0 hover:bg-gray-100"
-                      title="Delete Project"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
+                    {!user?.isAnonymous && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteClick(proj);
+                        }}
+                        className="text-gray-400 hover:text-red-500 p-1.5 rounded-md transition-colors ml-2 flex-shrink-0 hover:bg-gray-100"
+                        title="Delete Project"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
