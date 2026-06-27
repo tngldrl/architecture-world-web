@@ -92,6 +92,10 @@ export default function Dashboard() {
   const [adminPassword, setAdminPassword] = useState("");
   const [modalError, setModalError] = useState<string | null>(null);
 
+  // Project deletion state
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
   // News feed state
   const [newsFeedOpen, setNewsFeedOpen] = useState(false);
   const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
@@ -481,6 +485,31 @@ export default function Dashboard() {
     await startAnalysisWithParams(adminToken);
   };
 
+  const handleDeleteClick = (project: Project) => {
+    setProjectToDelete(project);
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!projectToDelete) return;
+    try {
+      const token = user && auth && !user.isAnonymous ? await user.getIdToken() : "guest";
+      const res = await fetch(`${API_BASE_URL}/api/projects/${projectToDelete.id}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      
+      setProjects(prev => prev.filter(p => p.id !== projectToDelete.id));
+      setShowDeleteModal(false);
+      setProjectToDelete(null);
+    } catch (err: any) {
+      alert("Failed to delete project: " + err.message);
+    }
+  };
+
   // ─── Auth screen ─────────────────────────────────────────────────────────
 
   if (authLoading) {
@@ -752,12 +781,27 @@ export default function Dashboard() {
                       {proj.created_at ? new Date(proj.created_at).toLocaleDateString() : ""}
                     </div>
                   </div>
-                  <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ml-2 ${proj.status === "ready" ? "bg-green-50 text-green-700 border border-green-200" :
-                      proj.status === "analyzing" ? "bg-blue-50 text-blue-700 border border-blue-200 animate-pulse" :
-                        "bg-red-50 text-red-700 border border-red-200"
-                    }`}>
-                    {proj.status}
-                  </span>
+                  <div className="flex items-center">
+                    <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ml-2 ${proj.status === "ready" ? "bg-green-50 text-green-700 border border-green-200" :
+                        proj.status === "analyzing" ? "bg-blue-50 text-blue-700 border border-blue-200 animate-pulse" :
+                          "bg-red-50 text-red-700 border border-red-200"
+                      }`}>
+                      {proj.status}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteClick(proj);
+                      }}
+                      className="text-gray-400 hover:text-red-500 p-1.5 rounded-md transition-colors ml-2 flex-shrink-0 hover:bg-gray-100"
+                      title="Delete Project"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -808,6 +852,38 @@ export default function Dashboard() {
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors"
               >
                 Verify & Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Premium Glassmorphism Delete Confirmation Modal */}
+      {showDeleteModal && projectToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity duration-300">
+          <div className="bg-white/95 border border-red-100 shadow-2xl rounded-2xl max-w-sm w-full p-6 mx-4 relative animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-bold text-red-600 mb-2">Delete Project</h3>
+            <p className="text-xs text-gray-500 mb-4 text-left">
+              Are you sure you want to permanently delete project <strong className="text-gray-800">"{projectToDelete.name || `World (${projectToDelete.id.substring(0, 8)})`}"</strong>? This action will permanently remove all associated repositories, microservices, dependencies, GCS avatars, and chat history.
+            </p>
+
+            <div className="flex justify-end gap-2 text-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setProjectToDelete(null);
+                }}
+                className="px-4 py-2 border border-gray-200 text-gray-600 rounded-md hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium transition-colors"
+              >
+                Permanently Delete
               </button>
             </div>
           </div>
