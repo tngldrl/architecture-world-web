@@ -69,7 +69,7 @@ async function sha256(message: string): Promise<string> {
 
 export default function Dashboard() {
   const [repositories, setRepositories] = useState<RepositoryInput[]>([
-    { url: "https://github.com/GoogleCloudPlatform/microservices-demo.git", webhook_enabled: false, watch_branch: "", has_webhook_access: null, checking_access: false },
+    { url: "", webhook_enabled: false, watch_branch: "", has_webhook_access: null, checking_access: false },
   ]);
 
   const [projectName, setProjectName] = useState("");
@@ -94,6 +94,7 @@ export default function Dashboard() {
 
   const [activeAnalyses, setActiveAnalyses] = useState<{ id: string, name: string, status: string, current_phase: string | null }[]>([]);
   const [refreshProjectsTrigger, setRefreshProjectsTrigger] = useState(0);
+  const [projectNotifications, setProjectNotifications] = useState<{ id: string, projectId: string, name: string, status: string, timestamp: string }[]>([]);
 
   // Project deletion state
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
@@ -221,7 +222,7 @@ export default function Dashboard() {
     fetchProjects();
   }, [user, refreshProjectsTrigger]);
 
-  // Load active analyses from localStorage on mount
+  // Load active analyses and project notifications from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem("active_analyses");
     if (saved) {
@@ -231,6 +232,14 @@ export default function Dashboard() {
         console.error("Failed to parse active analyses", e);
       }
     }
+    const savedNotifications = localStorage.getItem("project_notifications");
+    if (savedNotifications) {
+      try {
+        setProjectNotifications(JSON.parse(savedNotifications));
+      } catch (e) {
+        console.error("Failed to parse project notifications", e);
+      }
+    }
   }, []);
 
   // Sync active analyses to localStorage on change
@@ -238,10 +247,15 @@ export default function Dashboard() {
     localStorage.setItem("active_analyses", JSON.stringify(activeAnalyses));
   }, [activeAnalyses]);
 
+  // Sync project notifications to localStorage on change
+  useEffect(() => {
+    localStorage.setItem("project_notifications", JSON.stringify(projectNotifications));
+  }, [projectNotifications]);
+
   // Poll active analyses statuses
   useEffect(() => {
     if (activeAnalyses.length === 0) return;
-    
+
     let isMounted = true;
     const interval = setInterval(async () => {
       const token = user && auth && !user.isAnonymous ? await user.getIdToken() : "guest";
@@ -257,6 +271,16 @@ export default function Dashboard() {
             const data = await res.json();
             if (data.status !== analysis.status) {
               setRefreshProjectsTrigger(prev => prev + 1);
+              if (data.status === "ready" || data.status === "error") {
+                const newNotification = {
+                  id: `${analysis.id}-${Date.now()}`,
+                  projectId: analysis.id,
+                  name: analysis.name || data.name,
+                  status: data.status,
+                  timestamp: new Date().toISOString()
+                };
+                setProjectNotifications(prev => [newNotification, ...prev]);
+              }
             }
             return {
               id: analysis.id,
@@ -270,17 +294,17 @@ export default function Dashboard() {
         }
         return analysis;
       }));
-      
+
       if (isMounted) {
         setActiveAnalyses(updated);
       }
     }, 3000);
-    
+
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [activeAnalyses, user]);
+  }, [activeAnalyses, user, projectNotifications]);
 
   const handleCancelAnalysis = async (projectId: string) => {
     try {
@@ -302,6 +326,11 @@ export default function Dashboard() {
 
   const handleDismissAnalysis = (projectId: string) => {
     setActiveAnalyses(prev => prev.filter(a => a.id !== projectId));
+  };
+
+  const handleRemoveProjectNotification = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setProjectNotifications(prev => prev.filter(n => n.id !== id));
   };
 
   // ─── News Feed polling ──────────────────────────────────────────────────
@@ -479,22 +508,22 @@ export default function Dashboard() {
       const passwordHash = await sha256(adminPassword);
       const timestamp = Math.floor(Date.now() / 1000).toString();
       const digest = await sha256(passwordHash + timestamp);
-      
+
       const res = await fetch(`${API_BASE_URL}/api/admin/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ digest, timestamp })
       });
-      
+
       if (!res.ok) {
         throw new Error("Invalid password or verification failed");
       }
-      
+
       const data = await res.json();
       setAdminToken(data.token);
       setShowPasswordModal(false);
       setAdminPassword("");
-      
+
       await startAnalysisWithParams(data.token);
     } catch (err: any) {
       setModalError(err.message || "Verification failed");
@@ -507,9 +536,9 @@ export default function Dashboard() {
     setError(null);
     try {
       const token = user && auth && !user.isAnonymous ? await user.getIdToken() : "guest";
-      const headers: any = { 
-        "Content-Type": "application/json", 
-        "Authorization": `Bearer ${token}` 
+      const headers: any = {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
       };
       if (isDemo && tokenForAdmin) {
         headers["X-Admin-Session-Token"] = tokenForAdmin;
@@ -589,7 +618,7 @@ export default function Dashboard() {
       if (!res.ok) {
         throw new Error(await res.text());
       }
-      
+
       setProjects(prev => prev.filter(p => p.id !== projectToDelete.id));
       setShowDeleteModal(false);
       setProjectToDelete(null);
@@ -636,56 +665,108 @@ export default function Dashboard() {
 
   // ─── Main dashboard ──────────────────────────────────────────────────────
 
+  const allNotifications = [
+    ...projectNotifications.map(n => ({
+      id: n.id,
+      projectId: n.projectId,
+      type: "project",
+      title: n.name,
+      status: n.status,
+      message: n.status === "ready" ? "Project analysis completed successfully!" : "Project analysis failed.",
+      timestamp: n.timestamp
+    })),
+    ...deliveries.map(d => ({
+      id: d.id,
+      projectId: undefined,
+      type: "git",
+      title: repoDisplayName(d.repository_url),
+      status: "git",
+      message: `New push to ${d.branch}${d.commit_sha ? ` (${d.commit_sha.substring(0, 7)})` : ""}`,
+      timestamp: d.received_at || new Date().toISOString()
+    }))
+  ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
   return (
     <main className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 relative">
 
-      {/* ── Top-right: user info + news feed bell ── */}
+      {/* ── Top-right: user info + notifications bell ── */}
       <div className="absolute top-4 right-4 flex items-center gap-3">
-        {/* News Feed Button (only for logged-in non-guest) */}
+        {/* Notifications Button (only for logged-in non-guest) */}
         {user && !user.isAnonymous && (
           <div className="relative">
             <button
               id="news-feed-toggle"
               onClick={() => setNewsFeedOpen(v => !v)}
               className="relative p-2 rounded-full hover:bg-gray-200 transition-colors text-gray-600"
-              title="Push Notifications"
+              title="Notifications"
             >
               {/* Bell icon */}
               <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
               </svg>
-              {deliveries.length > 0 && (
+              {allNotifications.length > 0 && (
                 <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-emerald-500 rounded-full border border-white"></span>
               )}
             </button>
 
-            {/* News Feed Dropdown */}
+            {/* Notifications Dropdown */}
             {newsFeedOpen && (
               <div className="absolute right-0 top-10 w-80 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                  <span className="text-sm font-semibold text-gray-800">Push Notifications</span>
+                  <span className="text-sm font-semibold text-gray-800">Notifications</span>
                   <button onClick={() => setNewsFeedOpen(false)} className="text-gray-400 hover:text-gray-600 text-lg font-bold leading-none">&times;</button>
                 </div>
                 <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
-                  {deliveries.length === 0 ? (
+                  {allNotifications.length === 0 ? (
                     <p className="text-xs text-gray-400 text-center py-8 px-4">
-                      Connected repositories will appear here when a push event is received.
+                      Notifications will appear here when events occur.
                     </p>
                   ) : (
-                    deliveries.map(d => (
-                      <div key={d.id} className="px-4 py-3 hover:bg-gray-50 transition-colors">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-semibold text-gray-700 truncate">{repoDisplayName(d.repository_url)}</p>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              <span className="font-mono bg-gray-100 px-1 rounded text-[10px]">{d.branch}</span>
-                              {d.commit_sha && (
-                                <span className="ml-1.5 font-mono text-[10px] text-gray-400">{d.commit_sha.substring(0, 7)}</span>
-                              )}
-                            </p>
-                          </div>
-                          <span className="text-[10px] text-gray-400 whitespace-nowrap flex-shrink-0 mt-0.5">{timeAgo(d.received_at)}</span>
+                    allNotifications.map(n => (
+                      <div
+                        key={n.id}
+                        onClick={() => {
+                          if (n.type === "project" && n.status === "ready") {
+                            router.push(`/project/${n.projectId}`);
+                            setNewsFeedOpen(false);
+                          }
+                        }}
+                        className={`px-4 py-3 hover:bg-gray-50 transition-colors flex gap-2 items-start ${
+                          n.type === "project" && n.status === "ready" ? "cursor-pointer" : ""
+                        }`}
+                      >
+                        {/* Status Icon Indicator */}
+                        <div className="mt-0.5 flex-shrink-0">
+                          {n.type === "git" && (
+                            <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" title="Git Push"></span>
+                          )}
+                          {n.type === "project" && n.status === "ready" && (
+                            <span className="w-2 h-2 rounded-full bg-green-500 inline-block" title="Success"></span>
+                          )}
+                          {n.type === "project" && n.status === "error" && (
+                            <span className="w-2 h-2 rounded-full bg-red-500 inline-block" title="Failed"></span>
+                          )}
                         </div>
+
+                        {/* Content */}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-semibold text-gray-700 truncate">{n.title}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {n.message}
+                          </p>
+                          <span className="text-[10px] text-gray-400 block mt-1">{timeAgo(n.timestamp)}</span>
+                        </div>
+
+                        {/* Close / Dismiss Action for Project Notifications */}
+                        {n.type === "project" && (
+                          <button
+                            onClick={(e) => handleRemoveProjectNotification(n.id, e)}
+                            className="text-gray-400 hover:text-red-500 text-xs px-1 font-bold leading-none self-center hover:bg-gray-100 rounded p-1 transition-colors"
+                            title="Dismiss Notification"
+                          >
+                            &times;
+                          </button>
+                        )}
                       </div>
                     ))
                   )}
@@ -705,10 +786,10 @@ export default function Dashboard() {
           {activeAnalyses.map((analysis) => {
             const isTerminal = analysis.status === "ready" || analysis.status === "error" || analysis.status === "cancelled";
             const statusBg = analysis.status === "ready" ? "bg-green-50 border-green-200" :
-                             analysis.status === "error" ? "bg-red-50 border-red-200" :
-                             analysis.status === "cancelled" ? "bg-gray-50 border-gray-200" :
-                             "bg-blue-50 border-blue-200";
-            
+              analysis.status === "error" ? "bg-red-50 border-red-200" :
+                analysis.status === "cancelled" ? "bg-gray-50 border-gray-200" :
+                  "bg-blue-50 border-blue-200";
+
             return (
               <div key={analysis.id} className={`p-4 rounded-xl border flex flex-col gap-2 shadow-sm transition-all ${statusBg}`}>
                 <div className="flex justify-between items-start gap-4">
@@ -928,11 +1009,10 @@ export default function Dashboard() {
                       router.push(`/project/${proj.id}`);
                     }
                   }}
-                  className={`flex justify-between items-center p-3 rounded-lg border border-gray-200 transition-all ${
-                    proj.status === "ready"
+                  className={`flex justify-between items-center p-3 rounded-lg border border-gray-200 transition-all ${proj.status === "ready"
                       ? "hover:border-blue-500 hover:bg-blue-50/20 cursor-pointer"
                       : "cursor-default opacity-85"
-                  }`}
+                    }`}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -952,12 +1032,11 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="flex items-center">
-                    <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ml-2 ${
-                        proj.status === "ready" ? "bg-green-50 text-green-700 border border-green-200" :
+                    <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ml-2 ${proj.status === "ready" ? "bg-green-50 text-green-700 border border-green-200" :
                         proj.status === "analyzing" ? "bg-blue-50 text-blue-700 border border-blue-200 animate-pulse" :
-                        proj.status === "pending" ? "bg-amber-50 text-amber-700 border border-amber-200 animate-pulse" :
-                        proj.status === "cancelled" ? "bg-gray-50 text-gray-600 border border-gray-200" :
-                        "bg-red-50 text-red-700 border border-red-200"
+                          proj.status === "pending" ? "bg-amber-50 text-amber-700 border border-amber-200 animate-pulse" :
+                            proj.status === "cancelled" ? "bg-gray-50 text-gray-600 border border-gray-200" :
+                              "bg-red-50 text-red-700 border border-red-200"
                       }`}>
                       {proj.status}
                     </span>
@@ -990,7 +1069,7 @@ export default function Dashboard() {
             <p className="text-xs text-gray-500 mb-4">
               You are registering a Demo Project (Layout Template). Please enter the admin password to authorize this action.
             </p>
-            
+
             <input
               type="password"
               className="w-full border border-gray-300 rounded-md p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none mb-4 bg-white text-gray-900"
