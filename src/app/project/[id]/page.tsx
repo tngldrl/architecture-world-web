@@ -20,12 +20,12 @@ import ReactMarkdown from "react-markdown";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const CanvasBackgroundNode = memo(() => {
-  const kitchenImg = "/kitchen.jpg";
+  const kitchenImg = "/Gemini_Generated_Image_8qp5te8qp5te8qp5.png";
   const encodedKitchenImg = encodeURI(kitchenImg);
 
   return (
     <div
-      className="relative w-full h-full overflow-hidden select-none pointer-events-none bg-slate-50"
+      className="relative w-full h-full overflow-hidden select-none pointer-events-none bg-black"
       style={{
         maskImage: "radial-gradient(circle, black 65%, transparent 95%)",
         WebkitMaskImage: "radial-gradient(circle, black 65%, transparent 95%)",
@@ -33,22 +33,22 @@ const CanvasBackgroundNode = memo(() => {
     >
       {/* Kitchen Image (Bottom Right) */}
       <div
-        className="absolute inset-0 bg-cover bg-center"
+        className="absolute bottom-0 right-0 w-[55%] h-[55%] bg-cover bg-center bg-no-repeat"
         style={{
           backgroundImage: `url("${encodedKitchenImg}")`,
-          opacity: 0.6,
-          maskImage: "linear-gradient(135deg, transparent 45%, rgba(0, 0, 0, 0.3) 48%, black 52%)",
-          WebkitMaskImage: "linear-gradient(135deg, transparent 45%, rgba(0, 0, 0, 0.3) 48%, black 52%)",
+          opacity: 1.0,
+          maskImage: "radial-gradient(circle at bottom right, black 30%, transparent 100%)",
+          WebkitMaskImage: "radial-gradient(circle at bottom right, black 30%, transparent 100%)",
         }}
       />
       {/* Restaurant Dining Image (Top Left) */}
       <div
-        className="absolute inset-0 bg-cover bg-center"
+        className="absolute top-0 left-0 w-[55%] h-[55%] bg-cover bg-center bg-no-repeat"
         style={{
-          backgroundImage: "url('/hall.jpg')",
-          opacity: 0.6,
-          maskImage: "linear-gradient(135deg, black 48%, rgba(0, 0, 0, 0.3) 52%, transparent 55%)",
-          WebkitMaskImage: "linear-gradient(135deg, black 48%, rgba(0, 0, 0, 0.3) 52%, transparent 55%)",
+          backgroundImage: "url('/Gemini_Generated_Image_dqrkx3dqrkx3dqrk.png')",
+          opacity: 1.0,
+          maskImage: "radial-gradient(circle at top left, black 30%, transparent 100%)",
+          WebkitMaskImage: "radial-gradient(circle at top left, black 30%, transparent 100%)",
         }}
       />
     </div>
@@ -330,7 +330,7 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
   };
 
   return (
-    <main className="w-screen h-screen flex overflow-hidden relative bg-gray-50">
+    <main className="w-screen h-screen flex overflow-hidden relative bg-black">
       {/* Graph Area */}
       <div className={`flex-1 transition-all duration-300 ${isDrawerOpen ? 'mr-96' : ''}`}>
         <div className="absolute top-4 left-4 z-10 bg-white p-4 rounded shadow">

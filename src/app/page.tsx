@@ -14,6 +14,7 @@ interface Project {
   name: string | null;
   status: string;
   has_update: boolean;
+  is_demo?: boolean;
   created_at: string | null;
 }
 
@@ -235,35 +236,50 @@ export default function Dashboard() {
     fetchProjects();
   }, [user, refreshProjectsTrigger]);
 
-  // Load active analyses and project notifications from localStorage on mount
+  // Load active analyses and project notifications from localStorage when user changes
   useEffect(() => {
-    const saved = localStorage.getItem("active_analyses");
+    if (!user) {
+      setActiveAnalyses([]);
+      setProjectNotifications([]);
+      return;
+    }
+    const saved = localStorage.getItem(`active_analyses_${user.uid}`);
     if (saved) {
       try {
         setActiveAnalyses(JSON.parse(saved));
       } catch (e) {
         console.error("Failed to parse active analyses", e);
+        setActiveAnalyses([]);
       }
+    } else {
+      setActiveAnalyses([]);
     }
-    const savedNotifications = localStorage.getItem("project_notifications");
+    const savedNotifications = localStorage.getItem(`project_notifications_${user.uid}`);
     if (savedNotifications) {
       try {
         setProjectNotifications(JSON.parse(savedNotifications));
       } catch (e) {
         console.error("Failed to parse project notifications", e);
+        setProjectNotifications([]);
       }
+    } else {
+      setProjectNotifications([]);
     }
-  }, []);
+  }, [user]);
 
   // Sync active analyses to localStorage on change
   useEffect(() => {
-    localStorage.setItem("active_analyses", JSON.stringify(activeAnalyses));
-  }, [activeAnalyses]);
+    if (user) {
+      localStorage.setItem(`active_analyses_${user.uid}`, JSON.stringify(activeAnalyses));
+    }
+  }, [activeAnalyses, user]);
 
   // Sync project notifications to localStorage on change
   useEffect(() => {
-    localStorage.setItem("project_notifications", JSON.stringify(projectNotifications));
-  }, [projectNotifications]);
+    if (user) {
+      localStorage.setItem(`project_notifications_${user.uid}`, JSON.stringify(projectNotifications));
+    }
+  }, [projectNotifications, user]);
 
   // Poll active analyses statuses
   useEffect(() => {
@@ -684,6 +700,9 @@ export default function Dashboard() {
 
   // ─── Main dashboard ──────────────────────────────────────────────────────
 
+  const demoProjects = projects.filter(p => p.is_demo);
+  const personalProjects = projects.filter(p => !p.is_demo);
+
   const allNotifications = [
     ...projectNotifications.map(n => ({
       id: n.id,
@@ -1030,12 +1049,55 @@ export default function Dashboard() {
           </>
         )}
 
-        {/* Your Past Worlds */}
-        {projects.length > 0 && (
+        {/* Demo Worlds */}
+        {demoProjects.length > 0 && (
           <div className="mt-8 pt-6 border-t border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">{user?.isAnonymous ? "Demo Worlds" : "Your Past Worlds"}</h2>
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">Demo Worlds</h2>
             <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-              {projects.map((proj) => (
+              {demoProjects.map((proj) => (
+                <div key={proj.id}
+                  onClick={() => {
+                    if (proj.status === "ready") {
+                      router.push(`/project/${proj.id}`);
+                    }
+                  }}
+                  className={`flex justify-between items-center p-3 rounded-lg border border-gray-200 transition-all ${proj.status === "ready"
+                      ? "hover:border-blue-500 hover:bg-blue-50/20 cursor-pointer"
+                      : "cursor-default opacity-85"
+                    }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-800 truncate">
+                        {proj.name || `World (${proj.id.substring(0, 8)})`}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {proj.created_at ? new Date(proj.created_at).toLocaleDateString() : ""}
+                    </div>
+                  </div>
+                  <div className="flex items-center">
+                    <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ml-2 ${proj.status === "ready" ? "bg-green-50 text-green-700 border border-green-200" :
+                        proj.status === "analyzing" ? "bg-blue-50 text-blue-700 border border-blue-200 animate-pulse" :
+                          proj.status === "pending" ? "bg-amber-50 text-amber-700 border border-amber-200 animate-pulse" :
+                            proj.status === "cancelled" ? "bg-gray-50 text-gray-600 border border-gray-200" :
+                              "bg-red-50 text-red-700 border border-red-200"
+                      }`}>
+                      {proj.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Your Past Worlds */}
+        {!user?.isAnonymous && personalProjects.length > 0 && (
+          <div className="mt-6 pt-6 border-t border-gray-100">
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">Your Past Worlds</h2>
+            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+              {personalProjects.map((proj) => (
                 <div key={proj.id}
                   onClick={() => {
                     if (proj.status === "ready") {
@@ -1073,21 +1135,19 @@ export default function Dashboard() {
                       }`}>
                       {proj.status}
                     </span>
-                    {!user?.isAnonymous && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteClick(proj);
-                        }}
-                        className="text-gray-400 hover:text-red-500 p-1.5 rounded-md transition-colors ml-2 flex-shrink-0 hover:bg-gray-100"
-                        title="Delete Project"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteClick(proj);
+                      }}
+                      className="text-gray-400 hover:text-red-500 p-1.5 rounded-md transition-colors ml-2 flex-shrink-0 hover:bg-gray-100"
+                      title="Delete Project"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
                   </div>
                 </div>
               ))}
