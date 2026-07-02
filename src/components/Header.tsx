@@ -117,7 +117,7 @@ export default function Header({ projectName }: HeaderProps) {
           if (parsed.length !== projectNotifications.length) {
             setProjectNotifications(parsed);
           }
-        } catch (e) {}
+        } catch (e) { }
       }
     }, 2000);
     return () => clearInterval(interval);
@@ -165,8 +165,8 @@ export default function Header({ projectName }: HeaderProps) {
     ? user.isAnonymous
       ? "Guest User"
       : githubUsername
-      ? `${githubUsername}`
-      : user.displayName || user.email || "GitHub User"
+        ? `${githubUsername}`
+        : user.displayName || user.email || "GitHub User"
     : "";
 
   const allNotifications = [
@@ -197,7 +197,7 @@ export default function Header({ projectName }: HeaderProps) {
       {/* Left side: Logo */}
       <div className="flex items-center gap-3">
         <Link href="/" className="text-xl font-bold text-white hover:opacity-90 transition-opacity">
-          Architecture World
+          Micro Grand Maison
         </Link>
       </div>
 
@@ -258,9 +258,8 @@ export default function Header({ projectName }: HeaderProps) {
                             setNewsFeedOpen(false);
                           }
                         }}
-                        className={`px-4 py-3 hover:bg-slate-800/50 transition-colors flex gap-2 items-start ${
-                          n.type === "project" && n.status === "ready" ? "cursor-pointer" : ""
-                        }`}
+                        className={`px-4 py-3 hover:bg-slate-800/50 transition-colors flex gap-2 items-start ${n.type === "project" && n.status === "ready" ? "cursor-pointer" : ""
+                          }`}
                       >
                         <div className="mt-0.5 flex-shrink-0">
                           {n.type === "git" && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>}

@@ -96,6 +96,7 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"chat" | "relations">("chat");
+  const [repoAccordionOpen, setRepoAccordionOpen] = useState(false);
 
   const selectedRepoUrl = selectedMs
     ? repositories.find((r) => r.id === selectedMs.repository_id)?.url
@@ -396,7 +397,8 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
     <div className="w-screen h-screen flex flex-col overflow-hidden bg-black">
       <Header projectName={projectName} />
       {/* Sub-Header bar */}
-      <div className="w-full bg-slate-950 border-b border-slate-900/60 px-6 py-2.5 flex justify-between items-center z-20 text-xs">
+      <div className="w-full bg-slate-950 border-b border-slate-900/60 px-6 py-2 flex flex-col justify-center items-start gap-1 z-20 text-xs">
+        {/* Upper line: Project Name & Back to Dashboard */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-300">Project:</span>
@@ -411,23 +413,52 @@ export default function ProjectView({ params }: { params: Promise<{ id: string }
             <span>Back to Dashboard</span>
           </Link>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="font-medium text-slate-500">Source Repository:</span>
+
+        {/* Lower line: Source Repository (Single or Accordion for Multiple) */}
+        <div className="w-full text-slate-400">
           {repositories.length === 0 ? (
-            <span className="text-slate-500 italic">None</span>
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="font-medium text-slate-500">Source Repository:</span>
+              <span className="text-slate-500 italic">None</span>
+            </div>
+          ) : repositories.length === 1 ? (
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="font-medium text-slate-500">Source Repository:</span>
+              <a
+                href={repositories[0].url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 hover:underline font-mono"
+              >
+                {repositories[0].url}
+              </a>
+            </div>
           ) : (
-            <div className="flex items-center gap-3">
-              {repositories.map((repo) => (
-                <a
-                  key={repo.id}
-                  href={repo.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-400 hover:text-blue-300 hover:underline font-mono"
-                >
-                  {repo.url}
-                </a>
-              ))}
+            <div className="flex flex-col items-start gap-1 text-[11px]">
+              <button
+                onClick={() => setRepoAccordionOpen(prev => !prev)}
+                className="flex items-center gap-1.5 font-medium text-slate-400 hover:text-slate-200 transition-colors focus:outline-none"
+              >
+                <span>Source Repositories ({repositories.length}):</span>
+                <span className="text-blue-400 hover:underline font-semibold flex items-center">
+                  {repoAccordionOpen ? "Hide list ▲" : "Show list ▼"}
+                </span>
+              </button>
+              {repoAccordionOpen && (
+                <div className="flex flex-col gap-1 pl-4 mt-1 border-l border-slate-800">
+                  {repositories.map((repo) => (
+                    <a
+                      key={repo.id}
+                      href={repo.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-400 hover:text-blue-300 hover:underline font-mono"
+                    >
+                      {repo.url}
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
